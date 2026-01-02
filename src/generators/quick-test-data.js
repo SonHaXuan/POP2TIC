@@ -17,22 +17,30 @@ async function generateTestData() {
   if (!policy) {
     console.log("Creating privacy policy...");
     // Create simple privacy policy with nested set model
+    // Note: _id will be auto-generated as ObjectIds
     policy = await Models.PrivacyPolicy.create({
       attributes: [
-        { _id: "attr1", name: "Location", left: 1, right: 6 },
-        { _id: "attr2", name: "GPS", left: 2, right: 3, parent: "attr1" },
-        { _id: "attr3", name: "IP Address", left: 4, right: 5, parent: "attr1" },
-        { _id: "attr4", name: "Contact", left: 7, right: 10 },
-        { _id: "attr5", name: "Email", left: 8, right: 9, parent: "attr4" },
+        { name: "Location", left: 1, right: 6 },
+        { name: "GPS", left: 2, right: 3 },
+        { name: "IP Address", left: 4, right: 5 },
+        { name: "Contact", left: 7, right: 10 },
+        { name: "Email", left: 8, right: 9 },
       ],
       purposes: [
-        { _id: "purp1", name: "Marketing", left: 1, right: 4 },
-        { _id: "purp2", name: "Advertising", left: 2, right: 3, parent: "purp1" },
-        { _id: "purp3", name: "Analytics", left: 5, right: 6 },
+        { name: "Marketing", left: 1, right: 4 },
+        { name: "Advertising", left: 2, right: 3 },
+        { name: "Analytics", left: 5, right: 6 },
       ],
     });
     console.log("✓ Privacy policy created");
   }
+
+  // Get the actual ObjectIds from the policy
+  const locationAttr = policy.attributes.find((a) => a.name === "Location");
+  const gpsAttr = policy.attributes.find((a) => a.name === "GPS");
+  const contactAttr = policy.attributes.find((a) => a.name === "Contact");
+  const analyticsPurpose = policy.purposes.find((p) => p.name === "Analytics");
+  const marketingPurpose = policy.purposes.find((p) => p.name === "Marketing");
 
   // Create users
   const userCount = await Models.User.countDocuments();
@@ -42,12 +50,12 @@ async function generateTestData() {
       await Models.User.create({
         fullName: `Test User ${i}`,
         privacyPreference: {
-          allowedAttributes: ["attr1", "attr2"],
-          allowedPurposes: ["purp3"],
-          exceptAttributes: [],
-          exceptPurposes: [],
-          deniedAttributes: ["attr4"],
-          deniedPurposes: ["purp1"],
+          attributes: [locationAttr._id],
+          exceptions: [],
+          denyAttributes: [contactAttr._id],
+          allowedPurposes: [analyticsPurpose._id],
+          prohibitedPurposes: [marketingPurpose._id],
+          denyPurposes: [marketingPurpose._id],
           timeofRetention: 3600,
         },
       });
@@ -62,8 +70,8 @@ async function generateTestData() {
     for (let i = 0; i < 10; i++) {
       await Models.App.create({
         name: `Test App ${i}`,
-        attributes: ["attr2"],
-        purposes: ["purp3"],
+        attributes: [gpsAttr._id],
+        purposes: [analyticsPurpose._id],
         timeofRetention: 1800,
       });
     }

@@ -7,7 +7,8 @@ A **privacy compliance evaluation system** for fog computing environments that v
 - **Hash-based Edge Caching**: MD5 cache with TTL for ultra-low latency (2.36 ms)
 - **Nested Set Model**: Efficient hierarchical attribute/purpose queries
 - **Fog Computing Architecture**: IoT → Edge → Fog → Cloud (4-tier)
-- **Security**: MITM attack resistance, cache poisoning prevention
+- **Intel SGX Support**: Hardware-enclave secure privacy evaluation (optional)
+- **Security**: MITM attack resistance, cache poisoning prevention, SGX-protected evaluation
 - **Real-time**: Sub-3ms privacy evaluation suitable for IoT
 
 ## Quick Start
@@ -17,17 +18,37 @@ A **privacy compliance evaluation system** for fog computing environments that v
 npm install
 
 # Start MongoDB
-mongod --dbpath ~/data/db --fork
+mongod --dbpath ~/data/db --logpath ~/data/mongodb.log --fork
 
 # Generate test data
 npx babel-watch src/generators/quick-test-data.js
 
-# Start API server
+# Start API server (JavaScript evaluation)
 npm run api
+
+# Start API with SGX enclave (requires Intel SGX SDK)
+SGX_ENABLED=true npm run sgx-api
 
 # Run development mode
 npm run dev
 ```
+
+### Intel SGX Support (Optional)
+
+Privacy evaluation can be performed inside Intel SGX enclaves for hardware-level security:
+
+```bash
+# Build SGX enclave (requires Intel SGX SDK installed)
+npm run build-sgx
+
+# Enable SGX in .env
+echo "SGX_ENABLED=true" >> .env
+
+# Start with SGX
+npm run sgx-api
+```
+
+**Note**: If SGX is not available, the system automatically falls back to JavaScript evaluation. Check the `usingSGX` field in API responses to confirm the evaluation method.
 
 ## Architecture
 
@@ -97,17 +118,30 @@ src/
 ├── helpers/             # Privacy evaluation logic (nested set queries)
 ├── services/            # Database connection
 ├── api/                 # RESTful API server
+├── sgx/                 # Intel SGX enclave integration
+│   ├── enclave/         # SGX enclave (C++): Enclave.cpp, Enclave.h
+│   ├── app/             # Node.js native addon: App.cpp
+│   ├── build.sh         # Build script for enclave
+│   └── index.js         # JavaScript wrapper
 ├── benchmarks/          # Performance & security benchmarks
 │   ├── latency-benchmark.js
 │   ├── throughput-benchmark.js
 │   ├── fog-layer-benchmark.js
-│   └── mitm-attack-simulation.js
-├── baselines/           # Baseline comparisons (no-cache, flat-hierarchy)
-├── simulation/          # Fog computing simulation (NEW)
+│   ├── mitm-attack-simulation.js
+│   └── run-all-benchmarks.js
+├── baselines/           # Baseline comparisons
+│   ├── comparative-benchmark.js
+│   ├── flat-hierarchy.js
+│   └── no-cache.js
+├── simulation/          # Fog computing simulation
 │   ├── network-latency-simulator.js
 │   └── fog-layer-simulator.js
 ├── generators/          # Test data generators
-└── web/                 # Web UI prototype
+│   ├── quick-test-data.js
+│   └── test-data-generator.js
+├── metrics/             # Metrics collector for benchmarks
+├── web/                 # Web UI prototype
+└── index.js            # Entry point for basic evaluation demo
 ```
 
 ## Documentation
@@ -125,6 +159,7 @@ src/
 2. **Fog Layer Simulation**: Realistic IoT→Edge→Fog→Cloud latency modeling
 3. **Real-time Privacy Compliance**: Sub-3ms evaluation for IoT environments
 4. **Security Evaluation**: MITM attack resistance with 91.7% protection rate
+5. **Intel SGX Integration**: Hardware-enclave protected privacy evaluation
 
 ## Technology Stack
 
@@ -132,8 +167,32 @@ src/
 - **Database**: MongoDB with Mongoose
 - **Caching**: MD5 hash-based with TTL
 - **Data Model**: Nested Set Model for hierarchical queries
+- **Security**: Intel SGX SDK (optional, for enclave-protected evaluation)
+- **Native Addons**: Node-API (n-api) for SGX bridge
 - **Load Balancing**: Nginx (for horizontal scaling)
 - **Containerization**: Docker Compose
+
+## Intel SGX Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   Untrusted Memory                          │
+│  Node.js (Express API)  →  MongoDB fetch  →  JSON data     │
+└─────────────────────────────┬───────────────────────────────┘
+                              │ ECALL
+┌─────────────────────────────▼───────────────────────────────┐
+│                   Trusted Memory (SGX Enclave)              │
+│  • Parse JSON (app, user, policy)                           │
+│  • Nested Set Model evaluation (C++)                        │
+│  • Return "grant" or "deny"                                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Points:**
+- MongoDB runs outside enclave (no network I/O inside SGX)
+- Data fetched first, then passed to enclave for secure evaluation
+- Automatic fallback to JavaScript if SGX unavailable
+- Check `usingSGX` field in API response to confirm evaluation method
 
 ## Scalability
 

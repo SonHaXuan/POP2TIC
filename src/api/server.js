@@ -1,6 +1,9 @@
 /**
  * RESTful API Server for Privacy Compliance Evaluation
  * Provides HTTP endpoints for privacy evaluation, preference management, and benchmarking
+ *
+ * SGX Support: Can use Intel SGX enclave for secure privacy evaluation
+ * Set SGX_ENABLED=true in .env to enable
  */
 
 import dotenv from "dotenv";
@@ -106,13 +109,44 @@ app.post("/api/evaluate", async (req, res) => {
 
     let result;
     let cacheHit = false;
+    let usingSGX = false;
 
     if (cachedResult) {
       result = cachedResult.result;
       cacheHit = true;
     } else {
-      const isAccepted = await Helpers.PrivacyPreference.evaluate(app, user);
-      result = isAccepted ? "grant" : "deny";
+      // Get policy for evaluation
+      const policy = await Models.PrivacyPolicy.findOne();
+      if (!policy) {
+        return res.status(404).json({
+          error: "Privacy policy not found. Initialize database first.",
+        });
+      }
+
+      // Use SGX enclave if enabled, otherwise fall back to JavaScript
+      if (process.env.SGX_ENABLED === "true") {
+        try {
+          const sgxModule = await import("../sgx/index.js");
+          const sgxEvaluator = sgxModule.default;
+          const isSGXAvailable = sgxModule.isSGXAvailable();
+
+          if (isSGXAvailable) {
+            const isAccepted = await sgxEvaluator.evaluate(app, user, policy);
+            result = isAccepted ? "grant" : "deny";
+            usingSGX = true;
+            console.log(`[${SERVICE_ID}] Evaluation performed in SGX enclave`);
+          } else {
+            throw new Error("SGX not initialized");
+          }
+        } catch (sgxError) {
+          console.warn(`[${SERVICE_ID}] SGX evaluation failed, falling back to JS:`, sgxError.message);
+          const isAccepted = await Helpers.PrivacyPreference.evaluate(app, user);
+          result = isAccepted ? "grant" : "deny";
+        }
+      } else {
+        const isAccepted = await Helpers.PrivacyPreference.evaluate(app, user);
+        result = isAccepted ? "grant" : "deny";
+      }
 
       // Store in cache
       await Models.EvaluateHash.create({
@@ -129,6 +163,7 @@ app.post("/api/evaluate", async (req, res) => {
       result,
       latencyMs: latencyMs.toFixed(3),
       cacheHit,
+      usingSGX,
       service: SERVICE_ID,
       timestamp: new Date().toISOString(),
     });

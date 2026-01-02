@@ -15,7 +15,10 @@
     "api": "babel-watch src/api/server.js",
     "benchmark": "babel-watch src/benchmarks/run-all-benchmarks.js",
     "comparative": "babel-watch src/baselines/comparative-benchmark.js",
-    "fog-benchmark": "babel-watch src/benchmarks/fog-layer-benchmark.js"
+    "fog-benchmark": "babel-watch src/benchmarks/fog-layer-benchmark.js",
+    "build-sgx": "cd src/sgx && ./build.sh",
+    "build-addon": "cd src/sgx && node-gyp rebuild",
+    "sgx-api": "SGX_ENABLED=true babel-watch src/api/server.js"
   },
   "keywords": [],
   "author": "",
@@ -29,7 +32,8 @@
     "md5": "^2.3.0",
     "moment": "^2.29.1",
     "mongoose": "^5.11.8",
-    "mongoose-findorcreate": "^3.0.0"
+    "mongoose-findorcreate": "^3.0.0",
+    "node-addon-api": "^7.0.0"
   },
   "devDependencies": {
     "@babel/cli": "^7.12.10",
