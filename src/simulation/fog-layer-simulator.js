@@ -2,10 +2,34 @@
  * Fog Layer Simulator
  * Simulates IoT → Edge → Fog → Cloud hierarchical architecture
  * with realistic network latency modeling
+ *
+ * SGX Support: Fog nodes can use SGX enclave for local privacy evaluation
  */
 
 import axios from "axios";
 import NetworkLatency from "./network-latency-simulator.js";
+
+// SGX Evaluator (optional, loaded dynamically)
+let sgxEvaluator = null;
+let sgxAvailable = false;
+
+async function initSGX() {
+  if (process.env.SGX_ENABLED === "true") {
+    try {
+      const sgxModule = await import("../sgx/index.js");
+      sgxEvaluator = sgxModule.default;
+      sgxAvailable = sgxModule.isSGXAvailable();
+      if (sgxAvailable) {
+        console.log("[FogSimulator] SGX enclave support loaded for fog nodes");
+      }
+    } catch (error) {
+      console.warn("[FogSimulator] SGX support unavailable:", error.message);
+    }
+  }
+}
+
+// Auto-initialize SGX on module load
+initSGX().catch(() => {});
 
 /**
  * IoT Device Layer
@@ -246,19 +270,95 @@ class EdgeNode {
  * Fog Node Layer
  * More powerful than edge, provides privacy evaluation
  * Coordinates with cloud for policy storage
+ *
+ * SGX Support: Can perform local privacy evaluation using SGX enclave
  */
 class FogNode {
   constructor(nodeId, cloudUrl) {
     this.nodeId = nodeId;
     this.cloudUrl = cloudUrl;
+    this.useLocalSGX = sgxAvailable; // Use SGX for local evaluation if available
+  }
+
+  /**
+   * Perform local privacy evaluation using SGX enclave
+   * @param {Object} app - Application data
+   * @param {Object} user - User data with privacy preferences
+   * @param {Object} policy - Privacy policy data
+   * @returns {Promise<{result: string, usingSGX: boolean}>}
+   */
+  async localSGXEvaluate(app, user, policy) {
+    if (!sgxEvaluator || !sgxAvailable) {
+      throw new Error("SGX not available");
+    }
+
+    const isAccepted = await sgxEvaluator.evaluate(app, user, policy);
+    return {
+      result: isAccepted ? "grant" : "deny",
+      usingSGX: true,
+    };
   }
 
   /**
    * Process request from Edge node
    * Perform privacy evaluation with cloud database access
+   *
+   * @param {string} appId - Application ID
+   * @param {string} userId - User ID
+   * @param {string} deviceId - Device ID
+   * @param {string} edgeNodeId - Edge node ID
+   * @param {Object} appData - Optional app data for local SGX evaluation
+   * @param {Object} userData - Optional user data for local SGX evaluation
+   * @param {Object} policyData - Optional policy data for local SGX evaluation
+   * @param {number} bypassFlag - Bypass flag (0=skip evaluation, 1=normal evaluation)
+   *
+   * If SGX is enabled and policy data is cached locally, evaluates in the enclave.
+   * Otherwise, calls the cloud API (which may also use SGX).
    */
-  async processRequest(appId, userId, deviceId, edgeNodeId) {
+  async processRequest(appId, userId, deviceId, edgeNodeId, appData = null, userData = null, policyData = null, bypassFlag = 1) {
     const startTime = process.hrtime.bigint();
+
+    // Bypass flag: skip evaluation entirely (for timing measurement)
+    if (bypassFlag === 0) {
+      const endTime = process.hrtime.bigint();
+      const fogLatency = Number(endTime - startTime) / 1_000_000;
+      return {
+        result: "bypass",
+        bypassFlag: 0,
+        fogLatency: parseFloat(fogLatency.toFixed(3)),
+        fogNodeId: this.nodeId,
+        edgeNodeId,
+        deviceId,
+        bypassMode: true,
+      };
+    }
+
+    // Try local SGX evaluation if enabled and data is provided
+    if (this.useLocalSGX && appData && userData && policyData) {
+      try {
+        const evalStart = process.hrtime.bigint();
+        const localResult = await this.localSGXEvaluate(appData, userData, policyData);
+        const evalEnd = process.hrtime.bigint();
+        const evalTime = Number(evalEnd - evalStart) / 1_000_000;
+
+        const endTime = process.hrtime.bigint();
+        const fogLatency = Number(endTime - startTime) / 1_000_000;
+
+        return {
+          result: localResult.result,
+          usingSGX: localResult.usingSGX,
+          fogLatency: parseFloat(fogLatency.toFixed(3)),
+          fogEvaluationTime: parseFloat(evalTime.toFixed(3)),
+          fogNodeId: this.nodeId,
+          edgeNodeId,
+          deviceId,
+          localEvaluation: true,
+        };
+      } catch (sgxError) {
+        console.warn(`[FogNode ${this.nodeId}] Local SGX evaluation failed:`, sgxError.message);
+        // Fall through to cloud API call
+      }
+    }
 
     // Step 1: Fog → Cloud (simulated network delay)
     const fogCloudLatency = await NetworkLatency.fogToCloud();
@@ -279,6 +379,7 @@ class FogNode {
       fogNodeId: this.nodeId,
       edgeNodeId,
       deviceId,
+      localEvaluation: false,
     };
   }
 }
@@ -341,8 +442,17 @@ class FogComputingSimulator {
   /**
    * Simulate a request through the complete hierarchy
    * IoT → Edge → Fog → Cloud
+   *
+   * @param {number} deviceIndex - Index of IoT device
+   * @param {string} appId - Application ID
+   * @param {string} userId - User ID
+   * @param {Object} appData - Optional app data for local SGX evaluation
+   * @param {Object} userData - Optional user data for local SGX evaluation
+   * @param {Object} policyData - Optional policy data for local SGX evaluation
+   * @param {number} bypassFlag - Bypass flag (0=skip evaluation, 1=normal evaluation)
+   * @param {boolean} forceCacheMiss - Force edge cache miss for testing
    */
-  async simulateRequest(deviceIndex, appId, userId) {
+  async simulateRequest(deviceIndex, appId, userId, appData = null, userData = null, policyData = null, bypassFlag = 1, forceCacheMiss = false) {
     if (deviceIndex >= this.iotDevices.length) {
       throw new Error(`Device index ${deviceIndex} out of range`);
     }
@@ -362,39 +472,34 @@ class FogComputingSimulator {
     let edgeCacheHit = false;
     let edgeResult;
 
-    if (edgeNode.localCache.has(edgeCacheKey)) {
+    if (edgeNode.localCache.has(edgeCacheKey) && !forceCacheMiss) {
       edgeResult = edgeNode.localCache.get(edgeCacheKey);
       edgeCacheHit = true;
     } else {
       // Simulate Edge → Fog latency
       const edgeFogLatency = await NetworkLatency.edgeToFog();
 
-      // Fog processing
-      const fogStartTime = process.hrtime.bigint();
-
-      // Simulate Fog → Cloud latency
-      const fogCloudLatency = await NetworkLatency.fogToCloud();
-
-      // Cloud evaluation
-      const cloudResponse = await axios.post(`${this.cloudUrl}/api/evaluate`, {
+      // Fog processing - use local SGX if available and data is provided
+      const fogResponse = await fogNode.processRequest(
         appId,
         userId,
-      });
-
-      const fogEndTime = process.hrtime.bigint();
-      const fogProcessingTime = Number(fogEndTime - fogStartTime) / 1_000_000;
+        device.deviceId,
+        edgeNode.nodeId,
+        appData,
+        userData,
+        policyData,
+        bypassFlag
+      );
 
       edgeResult = {
-        ...cloudResponse.data,
-        fogCloudLatency: parseFloat(fogCloudLatency.toFixed(3)),
-        fogProcessingTime: parseFloat(fogProcessingTime.toFixed(3)),
-        fogNodeId: fogNode.nodeId,
+        ...fogResponse,
+        edgeFogLatency: parseFloat(edgeFogLatency.toFixed(3)),
       };
 
-      edgeResult.edgeFogLatency = parseFloat(edgeFogLatency.toFixed(3));
-
-      // Cache at edge
-      edgeNode.localCache.set(edgeCacheKey, edgeResult);
+      // Cache at edge (only cache successful results)
+      if (edgeResult.result) {
+        edgeNode.localCache.set(edgeCacheKey, edgeResult);
+      }
     }
 
     const edgeEndTime = process.hrtime.bigint();

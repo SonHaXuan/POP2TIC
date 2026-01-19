@@ -1,0 +1,23 @@
+import "sgx_t.edl" import "sgx_tcrypto.edl";
+
+enclave {
+    trusted {
+        // Define ECALLs (Enclave Calls - calls from untrusted to trusted)
+
+        // Main privacy evaluation entry point
+        // Returns: 0 on success, negative on error
+        // result buffer will contain "grant" or "deny"
+        public int ecall_evaluate_privacy(
+            [in, string] const char* appJson,
+            [in, string] const char* userJson,
+            [in, string] const char* policyJson,
+            [out, string] char* result,
+            [in, size=resultLen] size_t resultLen
+        );
+    };
+
+    untrusted {
+        // Define OCALLs (Outside Calls - calls from trusted to untrusted)
+        // None needed for this implementation
+    };
+};

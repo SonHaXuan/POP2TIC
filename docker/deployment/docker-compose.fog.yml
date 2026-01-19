@@ -1,0 +1,295 @@
+# Docker Compose for Fog Node Deployment with SGX
+# This configuration deploys a complete fog computing layer
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Fog Node (SGX-Enabled)
+  # ============================================================================
+  fog-node-1:
+    build:
+      context: ../..
+      dockerfile: docker/deployment/Dockerfile.fog
+    container_name: pop2tic-fog-1
+    privileged: true  # Required for SGX device access
+    ports:
+      - "5001:5000"
+    environment:
+      - NODE_ENV=production
+      - NODE_TYPE=fog
+      - SERVICE_ID=fog-node-1
+      - PORT=5000
+      - SGX_ENABLED=true
+      - MONGODB_URL=mongodb://mongodb:27017/privacy-policy
+      - MAX_CONCURRENT_EVALUATIONS=10
+      - POLICY_CACHE_SIZE=100
+      - USER_PREF_CACHE_SIZE=500
+      - APP_CACHE_SIZE=200
+    volumes:
+      - ./logs/fog1:/app/logs
+      - /dev/sgx:/dev/sgx
+    devices:
+      - /dev/sgx/enclave:/dev/sgx/enclave
+      - /dev/sgx/provision:/dev/sgx/provision
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - apparmor:unconfined
+    depends_on:
+      - mongodb
+    networks:
+      - fog-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  fog-node-2:
+    build:
+      context: ../..
+      dockerfile: docker/deployment/Dockerfile.fog
+    container_name: pop2tic-fog-2
+    privileged: true
+    ports:
+      - "5002:5000"
+    environment:
+      - NODE_ENV=production
+      - NODE_TYPE=fog
+      - SERVICE_ID=fog-node-2
+      - PORT=5000
+      - SGX_ENABLED=true
+      - MONGODB_URL=mongodb://mongodb:27017/privacy-policy
+      - MAX_CONCURRENT_EVALUATIONS=10
+    volumes:
+      - ./logs/fog2:/app/logs
+      - /dev/sgx:/dev/sgx
+    devices:
+      - /dev/sgx/enclave:/dev/sgx/enclave
+      - /dev/sgx/provision:/dev/sgx/provision
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - apparmor:unconfined
+    depends_on:
+      - mongodb
+    networks:
+      - fog-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  fog-node-3:
+    build:
+      context: ../..
+      dockerfile: docker/deployment/Dockerfile.fog
+    container_name: pop2tic-fog-3
+    privileged: true
+    ports:
+      - "5003:5000"
+    environment:
+      - NODE_ENV=production
+      - NODE_TYPE=fog
+      - SERVICE_ID=fog-node-3
+      - PORT=5000
+      - SGX_ENABLED=true
+      - MONGODB_URL=mongodb://mongodb:27017/privacy-policy
+      - MAX_CONCURRENT_EVALUATIONS=10
+    volumes:
+      - ./logs/fog3:/app/logs
+      - /dev/sgx:/dev/sgx
+    devices:
+      - /dev/sgx/enclave:/dev/sgx/enclave
+      - /dev/sgx/provision:/dev/sgx/provision
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - apparmor:unconfined
+    depends_on:
+      - mongodb
+    networks:
+      - fog-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ============================================================================
+  # MongoDB Database
+  # ============================================================================
+  mongodb:
+    image: mongo:5.0
+    container_name: pop2tic-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=privacy-policy
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - fog-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Edge Nodes (Lightweight caching layer)
+  # ============================================================================
+  edge-node-1:
+    build:
+      context: ../..
+      dockerfile: docker/deployment/Dockerfile.edge
+    container_name: pop2tic-edge-1
+    ports:
+      - "4001:4000"
+    environment:
+      - NODE_ENV=production
+      - NODE_TYPE=edge
+      - SERVICE_ID=edge-node-1
+      - PORT=4000
+      - FOG_NODE_URL=http://fog-node-1:5000
+      - CACHE_MAX_SIZE=10000
+    volumes:
+      - ./logs/edge1:/app/logs
+    depends_on:
+      - fog-node-1
+    networks:
+      - fog-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  edge-node-2:
+    build:
+      context: ../..
+      dockerfile: docker/deployment/Dockerfile.edge
+    container_name: pop2tic-edge-2
+    ports:
+      - "4002:4000"
+    environment:
+      - NODE_ENV=production
+      - NODE_TYPE=edge
+      - SERVICE_ID=edge-node-2
+      - PORT=4000
+      - FOG_NODE_URL=http://fog-node-2:5000
+      - CACHE_MAX_SIZE=10000
+    volumes:
+      - ./logs/edge2:/app/logs
+    depends_on:
+      - fog-node-2
+    networks:
+      - fog-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  edge-node-3:
+    build:
+      context: ../..
+      dockerfile: docker/deployment/Dockerfile.edge
+    container_name: pop2tic-edge-3
+    ports:
+      - "4003:4000"
+    environment:
+      - NODE_ENV=production
+      - NODE_TYPE=edge
+      - SERVICE_ID=edge-node-3
+      - PORT=4000
+      - FOG_NODE_URL=http://fog-node-3:5000
+      - CACHE_MAX_SIZE=10000
+    volumes:
+      - ./logs/edge3:/app/logs
+    depends_on:
+      - fog-node-3
+    networks:
+      - fog-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================================
+  # Load Balancer (Nginx)
+  # ============================================================================
+  load-balancer:
+    image: nginx:alpine
+    container_name: pop2tic-load-balancer
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - fog-node-1
+      - fog-node-2
+      - fog-node-3
+    networks:
+      - fog-network
+    restart: unless-stopped
+
+  # ============================================================================
+  # Monitoring (Prometheus + Grafana)
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pop2tic-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - fog-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pop2tic-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - fog-network
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  fog-network:
+    driver: bridge

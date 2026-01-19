@@ -1,2 +1,83 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+build/
+
+# SGX build artifacts
+src/sgx/build/
+src/sgx/app/enclave.signed.so
+src/sgx/app/*.o
+src/sgx/app/*.so
+src/sgx/enclave/*.o
+src/sgx/enclave/*.so
+src/sgx/enclave/enclave_private.pem
+
+# Generated files
+*.log
+*.csv
+*.json.bak
+
+# Benchmark results
+results/
+benchmark_*.json
+benchmark_*.txt
+benchmark_*.csv
+
+# Environment files
+.env.local
+.env.*.local
+
+# Database
+data/db/
+data/mongodb/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json.backup
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Logs
+logs
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
