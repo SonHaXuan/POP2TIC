@@ -1,0 +1,59 @@
+# POP2TIC Edge Node
+# Lightweight edge node for local caching and request routing
+
+FROM node:20-alpine AS edge
+
+LABEL maintainer="POP2TIC"
+LABEL description="Edge Node with Local Caching"
+LABEL version="1.0.0"
+
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init curl
+
+# Create app user
+RUN addgroup -g 1001 pop2tic && \
+    adduser -D -u 1001 -G pop2tic pop2tic
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install production dependencies only
+RUN npm ci --only=production && npm cache clean --force
+
+# Copy source code
+COPY src/ ./src/
+COPY babel.config.json ./
+
+# Build application
+RUN npm run build
+
+# Create logs directory
+RUN mkdir -p /app/logs && chown -R pop2tic:pop2tic /app
+
+# Switch to non-root user
+USER pop2tic
+
+# Expose port
+EXPOSE 4000
+
+# Environment variables
+ENV NODE_ENV=production
+ENV NODE_TYPE=edge
+ENV SERVICE_ID=edge-node-1
+ENV PORT=4000
+ENV FOG_NODE_URL=http://fog-node-1:5000
+ENV CACHE_MAX_SIZE=10000
+ENV METRICS_ENABLED=true
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:4000/health || exit 1
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start application
+CMD ["node", "dist/edge-server.js"]

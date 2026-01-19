@@ -303,11 +303,35 @@ class FogNode {
    * Process request from Edge node
    * Perform privacy evaluation with cloud database access
    *
+   * @param {string} appId - Application ID
+   * @param {string} userId - User ID
+   * @param {string} deviceId - Device ID
+   * @param {string} edgeNodeId - Edge node ID
+   * @param {Object} appData - Optional app data for local SGX evaluation
+   * @param {Object} userData - Optional user data for local SGX evaluation
+   * @param {Object} policyData - Optional policy data for local SGX evaluation
+   * @param {number} bypassFlag - Bypass flag (0=skip evaluation, 1=normal evaluation)
+   *
    * If SGX is enabled and policy data is cached locally, evaluates in the enclave.
    * Otherwise, calls the cloud API (which may also use SGX).
    */
-  async processRequest(appId, userId, deviceId, edgeNodeId, appData = null, userData = null, policyData = null) {
+  async processRequest(appId, userId, deviceId, edgeNodeId, appData = null, userData = null, policyData = null, bypassFlag = 1) {
     const startTime = process.hrtime.bigint();
+
+    // Bypass flag: skip evaluation entirely (for timing measurement)
+    if (bypassFlag === 0) {
+      const endTime = process.hrtime.bigint();
+      const fogLatency = Number(endTime - startTime) / 1_000_000;
+      return {
+        result: "bypass",
+        bypassFlag: 0,
+        fogLatency: parseFloat(fogLatency.toFixed(3)),
+        fogNodeId: this.nodeId,
+        edgeNodeId,
+        deviceId,
+        bypassMode: true,
+      };
+    }
 
     // Try local SGX evaluation if enabled and data is provided
     if (this.useLocalSGX && appData && userData && policyData) {
@@ -425,8 +449,10 @@ class FogComputingSimulator {
    * @param {Object} appData - Optional app data for local SGX evaluation
    * @param {Object} userData - Optional user data for local SGX evaluation
    * @param {Object} policyData - Optional policy data for local SGX evaluation
+   * @param {number} bypassFlag - Bypass flag (0=skip evaluation, 1=normal evaluation)
+   * @param {boolean} forceCacheMiss - Force edge cache miss for testing
    */
-  async simulateRequest(deviceIndex, appId, userId, appData = null, userData = null, policyData = null) {
+  async simulateRequest(deviceIndex, appId, userId, appData = null, userData = null, policyData = null, bypassFlag = 1, forceCacheMiss = false) {
     if (deviceIndex >= this.iotDevices.length) {
       throw new Error(`Device index ${deviceIndex} out of range`);
     }
@@ -446,7 +472,7 @@ class FogComputingSimulator {
     let edgeCacheHit = false;
     let edgeResult;
 
-    if (edgeNode.localCache.has(edgeCacheKey)) {
+    if (edgeNode.localCache.has(edgeCacheKey) && !forceCacheMiss) {
       edgeResult = edgeNode.localCache.get(edgeCacheKey);
       edgeCacheHit = true;
     } else {
@@ -461,7 +487,8 @@ class FogComputingSimulator {
         edgeNode.nodeId,
         appData,
         userData,
-        policyData
+        policyData,
+        bypassFlag
       );
 
       edgeResult = {

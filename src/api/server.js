@@ -58,7 +58,8 @@ app.get("/", (req, res) => {
       updatePreferences: "PUT /api/users/:userId/preferences",
       apps: "GET /api/apps",
       createApp: "POST /api/apps",
-      policy: "GET /api/policy",
+      getPolicy: "GET /api/policy",
+      updatePolicy: "PUT /api/policy",
       cacheStats: "GET /api/cache/stats",
       clearCache: "DELETE /api/cache",
     },
@@ -92,9 +93,21 @@ app.post("/api/evaluate", async (req, res) => {
 
     const startTime = process.hrtime.bigint();
 
-    // Check cache
+    // Get policy for cache key (must fetch before cache check for version)
+    const policy = await Models.PrivacyPolicy.findOne();
+    if (!policy) {
+      return res.status(404).json({
+        error: "Privacy policy not found. Initialize database first.",
+      });
+    }
+
+    // Check cache - policy version included to invalidate on policy updates
     const hashValue = md5(
-      md5(JSON.stringify(app)) + "-" + md5(JSON.stringify(user.privacyPreference))
+      md5(JSON.stringify(app)) +
+        "-" +
+        md5(JSON.stringify(user.privacyPreference)) +
+        "-" +
+        md5(policy.version)
     );
 
     const cachedResult = await Models.EvaluateHash.findOne({
@@ -115,14 +128,6 @@ app.post("/api/evaluate", async (req, res) => {
       result = cachedResult.result;
       cacheHit = true;
     } else {
-      // Get policy for evaluation
-      const policy = await Models.PrivacyPolicy.findOne();
-      if (!policy) {
-        return res.status(404).json({
-          error: "Privacy policy not found. Initialize database first.",
-        });
-      }
-
       // Use SGX enclave if enabled, otherwise fall back to JavaScript
       if (process.env.SGX_ENABLED === "true") {
         try {
@@ -382,6 +387,56 @@ app.get("/api/policy", async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: "Failed to fetch policy",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * PUT /api/policy
+ * Update privacy policy and increment version (invalidates all cache entries)
+ */
+app.put("/api/policy", async (req, res) => {
+  try {
+    const { attributes, purposes } = req.body;
+
+    if (!attributes || !purposes) {
+      return res.status(400).json({
+        error: "Missing required fields: attributes, purposes",
+      });
+    }
+
+    // Find existing policy or create new one
+    let policy = await Models.PrivacyPolicy.findOne();
+
+    if (policy) {
+      // Update existing policy with new version (invalidates cache)
+      policy = await Models.PrivacyPolicy.findOneAndUpdate(
+        {},
+        {
+          attributes,
+          purposes,
+          version: Date.now().toString(),
+        },
+        { new: true }
+      );
+    } else {
+      // Create new policy
+      policy = await Models.PrivacyPolicy.create({
+        attributes,
+        purposes,
+        version: Date.now().toString(),
+      });
+    }
+
+    res.json({
+      message: "Privacy policy updated successfully",
+      policy,
+      note: "Cache invalidated due to policy version change",
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to update policy",
       message: error.message,
     });
   }
